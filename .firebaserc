@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "feather-7bb6e",
+    "dev": "feather-7bb6e",
+    "prod": "feather-7bb6e"
+  }
+}
