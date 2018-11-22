@@ -54,7 +54,7 @@ export const handleSMS = functions.https.onRequest(async (req, res) => {
         });
 
         await twilioClient.messages.create({
-          body: 'Connecting you to a guide now...',
+          body: 'Welcome to the Feather Network, an anonymous social health network. Connecting you to a guide now...',
           to: sentFrom,
           from: functions.config().twilio.phone,
         });
@@ -72,7 +72,11 @@ export const handleSMS = functions.https.onRequest(async (req, res) => {
             connected: false,
           });
 
-          // this should trigger a timer to check for new guides
+          await twilioClient.messages.create({
+            body: `No guides are currently available. We will text you back when one becomes available or you can end the session anytime by texting DONE`,
+            to: sentFrom,
+            from: functions.config().twilio.phone,
+          });
         } else {
           await guideRef.update({
             connected: true,
@@ -114,6 +118,12 @@ export const handleSMS = functions.https.onRequest(async (req, res) => {
 
         await sessionRef.update({
           messages: session.messages,
+        });
+
+        await twilioClient.messages.create({
+          body: 'Still waiting on a guide to become available.',
+          to: sentFrom,
+          from: functions.config().twilio.phone,
         });
       } else {
         const sessionRef = db.collection('sessions').doc(session.id);
@@ -213,3 +223,65 @@ export const handleSMS = functions.https.onRequest(async (req, res) => {
     res.end();
   }
 });
+
+export const guideUpdated = functions.firestore.document('guides/{guideId}').onUpdate(async (change, context) => {
+  const oldDoc = change.before.data();
+  const newDoc = change.after.data();
+
+  if (oldDoc.connected && !newDoc.connected) {
+    const sessions = await db.collection('sessions').where('connected', '==', false).orderBy('started').limit(1).get();
+
+    let session;
+
+    sessions.forEach((doc) => {
+      session = {
+        id: doc.id,
+        ...doc.data(),
+      };
+    });
+
+    console.log(session);
+
+    if (session) {
+      const sessionRef = db.collection('sessions').doc(session.id);
+
+      await sessionRef.update({
+        connected: true,
+        guide: newDoc.phone,
+      });
+
+      const guideRef = db.collection('guides').doc(context.params.guideId);
+
+      await guideRef.update({
+        connected: true,
+        session: session.id,
+      });
+
+      await twilioClient.messages.create({
+        body: `You are being connected to a new patient. You can end the session anytime by texting DONE`,
+        to: newDoc.phone,
+        from: functions.config().twilio.phone,
+      });
+
+      let message = 'Patient: ';
+
+      session.messages.forEach((m) => {
+        message = `${message} ${m.message}`;
+      });
+
+      await twilioClient.messages.create({
+        body: message,
+        to: newDoc.phone,
+        from: functions.config().twilio.phone,
+      });
+
+      await twilioClient.messages.create({
+        body: `You are now connected with ${newDoc.name}. You can end the session anytime by texting DONE`,
+        to: session.patient,
+        from: functions.config().twilio.phone,
+      });
+    }
+  }
+});
+
+
